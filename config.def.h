@@ -144,7 +144,30 @@ static Button buttons[] = {
 #endif /* CONFIG_MOUSE */
 
 static Cmd commands[] = {
-	{ "create", { create,	{ NULL } } },
+	{ "create",         { create,	      { NULL }                    } },
+	{ "createcwd",      { create,         { NULL, NULL, "$CWD" }      } },
+	{ "killclient",     { killclient,     { NULL }                    } },
+	{ "focusnext",      { focusnext,      { NULL }                    } },
+	{ "focusnextnm",    { focusnextnm,    { NULL }                    } },
+	{ "focusprevnm",    { focusprevnm,    { NULL }                    } },
+	{ "focusprev",      { focusprev,      { NULL }                    } },
+	{ "setlayout",      { setlayout,      { NULL }                    } },
+	{ "setmfact",       { setmfact,       { NULL }                    } },
+	{ "toggleminimize", { toggleminimize, { NULL }                    } },
+	{ "togglebar",      { togglebar,      { NULL }                    } },
+	{ "togglemouse",    { togglemouse,    { NULL }                    } },
+	{ "zoom ",          { zoom ,          { NULL }                    } },
+	{ "focus",          { focusn,         { NULL }                    } },
+	{ "quit",           { quit,           { NULL }                    } },
+	{ "escapekey",      { escapekey,      { NULL }                    } },
+	{ "togglerunall",   { togglerunall,   { NULL }                    } },
+	{ "redraw",         { redraw,         { NULL }                    } },
+	{ "lock",           { lock,           { NULL }                    } },
+	{ "togglebell",     { togglebell,     { NULL }                    } },
+	{ "copymode",       { copymode,       { NULL }                    } },
+	{ "paste",          { paste,          { NULL }                    } },
+	{ "scrollback",     { scrollback,     { NULL }                    } },
+	{ "help",           { create,         { "man dvtm", "dvtm help" } } },
 };
 
 /* gets executed when dvtm is started */

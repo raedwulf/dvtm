@@ -66,7 +66,7 @@ static Key keys[] = {
 	{   0, ALT('.'),       { toggleminimize, { NULL }                    } },
 	{   0, ALT('s'),       { togglebar,      { NULL }                    } },
 	{   0, ALT('M'),       { togglemouse,    { NULL }                    } },
-	{   0, ALT('\n')',     { zoom ,          { NULL }                    } },
+	{   0, ALT('\n'),      { zoom ,          { NULL }                    } },
 	{   0, ALT('1'),       { focusn,         { "1" }                     } },
 	{   0, ALT('2'),       { focusn,         { "2" }                     } },
 	{   0, ALT('3'),       { focusn,         { "3" }                     } },

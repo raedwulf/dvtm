@@ -18,6 +18,8 @@ dvtm \- dynamic virtual terminal manager
 .IR status-fifo ]
 .RB [ \-c
 .IR cmd-fifo ]
+.RB [ \-e
+.IR event-fifo ]
 .RI [ command \ ... "" ]
 .SH DESCRIPTION
 dvtm is a dynamic tiling window manager for the console.
@@ -59,6 +61,11 @@ Open or create the named pipe
 .I cmd-fifo
 and look for commands to execute which were defined in
 .IR config.h .
+.TP
+.BI \-e \ event-fifo
+Open or create the named pipe
+.I event-fifo
+and output the current window layout.
 .TP
 .IR command \ ...
 Execute

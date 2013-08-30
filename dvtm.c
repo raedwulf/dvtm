@@ -625,6 +625,30 @@ keybinding(unsigned int mod, unsigned int code) {
 	return NULL;
 }
 
+static int
+escapestring(char *dst, const char *src, int len) {
+	int j = 0;
+	for (int i = 0; i < len; i++) {
+		switch (src[i]) {
+		case '\a': dst[j++] = '\\'; dst[j++] = 'a'; break;
+		case '\b': dst[j++] = '\\'; dst[j++] = 'b'; break;
+		case '\f': dst[j++] = '\\'; dst[j++] = 'f'; break;
+		case '\n': dst[j++] = '\\'; dst[j++] = 'n'; break;
+		case '\r': dst[j++] = '\\'; dst[j++] = 'r'; break;
+		case '\t': dst[j++] = '\\'; dst[j++] = 't'; break;
+		case '\v': dst[j++] = '\\'; dst[j++] = 'v'; break;
+		case '\e': dst[j++] = '\\'; dst[j++] = 'e'; break;
+		case '\0': dst[j++] = '\\'; dst[j++] = '0'; break;
+		default:
+			if (src[i] < ' ')
+				j += snprintf(dst + j, 5, "\\%03o", src[i]);
+			else
+				dst[j++] = src[i];
+		}
+	}
+	return j;
+}
+
 static void
 keypress(int code) {
 	Client *c;
@@ -644,32 +668,17 @@ keypress(int code) {
 			if (code == '\e') {
 				if (inputmode && evtfifo.fd != -1) {
 					char bufesc[sizeof(buf)*4+2] = { 'E' };
-					for (int i, j = 1; i < len; i++) {
-						switch (buf[i]) {
-						case '\a': bufesc[j++] = '\\'; bufesc[j++] = 'a'; break;
-						case '\b': bufesc[j++] = '\\'; bufesc[j++] = 'b'; break;
-						case '\f': bufesc[j++] = '\\'; bufesc[j++] = 'f'; break;
-						case '\n': bufesc[j++] = '\\'; bufesc[j++] = 'n'; break;
-						case '\r': bufesc[j++] = '\\'; bufesc[j++] = 'r'; break;
-						case '\t': bufesc[j++] = '\\'; bufesc[j++] = 't'; break;
-						case '\v': bufesc[j++] = '\\'; bufesc[j++] = 'v'; break;
-						case '\e': bufesc[j++] = '\\'; bufesc[j++] = 'e'; break;
-						case '\0': bufesc[j++] = '\\'; bufesc[j++] = '0'; break;
-						default:
-							if (buf[i] < ' ') {
-								bufesc[j++] = '\\'; bufesc[j++] = '0';
-								j += snprintf(bufesc + j, 2, "%02o", buf[i]);
-							} else
-								bufesc[j++] = buf[i];
-						}
-					}
-					write(evtfifo.fd, bufesc, len);
+					int lenesc = escapestring(bufesc+1, buf, len)+2;
+					bufesc[lenesc-1] = '\n';
+					write(evtfifo.fd, bufesc, lenesc);
 				} else
 					vt_write(c->term, buf, len);
 			} else {
 				if (inputmode && evtfifo.fd != -1) {
-					char buf[4] = { 'K', code, '\n', '\0' };
-					write(evtfifo.fd, buf, sizeof(buf));
+					char bufesc[6] = { 'K' }; char c = (char)code;
+					int lenesc = escapestring(bufesc+1, &c, 1)+1;
+					bufesc[lenesc-1] = '\n';
+					write(evtfifo.fd, buf, lenesc);
 				} else
 					vt_keypress(c->term, code);
 			}

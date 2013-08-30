@@ -116,6 +116,7 @@ typedef struct {
 
 enum { BAR_TOP, BAR_BOTTOM, BAR_OFF };
 enum { ALIGN_LEFT, ALIGN_RIGHT };
+enum { PIPE_NONE, PIPE_INPUT };
 
 typedef struct {
 	int fd;
@@ -166,6 +167,9 @@ static void toggleminimize(const char *args[]);
 static void togglemouse(const char *args[]);
 static void togglerunall(const char *args[]);
 static void zoom(const char *args[]);
+static void focusid(const char *args[]);
+static void titleid(const char *args[]);
+static void setinputmode(const char *args[]);
 
 /* commands for use by mouse bindings */
 static void mouse_focus(const char *args[]);
@@ -191,10 +195,12 @@ static bool mouse_events_enabled = ENABLE_MOUSE;
 static Layout *layout = layouts;
 static StatusBar bar = { -1, BAR_POS, 1 };
 static CmdFifo cmdfifo = { -1 };
+static CmdFifo evtfifo = { -1 };
 static const char *shell;
 static char *copybuf;
 static volatile sig_atomic_t running = true;
 static bool runinall = false;
+static int inputmode = PIPE_NONE;
 
 static void
 eprint(const char *errstr, ...) {
@@ -325,10 +331,30 @@ draw_all(bool border) {
 }
 
 static void
+arrange_event() {
+	if (evtfifo.fd != -1) {
+		Client *c;
+		char prefix = 'A';
+		write(evtfifo.fd, &prefix, 1);
+		for (c = clients; c; c = c->next) {
+			char buf[128];
+			int end = snprintf(buf, sizeof(buf),
+				"|%d,%d,%d,%d,%d,%d,%d,%d",
+				c->id, c->x, c->y, c->w, c->h,
+				c == sel, c->minimized, c->died);
+			write(evtfifo.fd, buf, end);
+		}
+		char newline = '\n';
+		write(evtfifo.fd, &newline, 1);
+	}
+}
+
+static void
 arrange() {
 	clear_workspace();
 	attrset(NORMAL_ATTR);
 	layout->arrange();
+	arrange_event();
 	wnoutrefresh(stdscr);
 	draw_all(true);
 }
@@ -401,6 +427,7 @@ focus(Client *c) {
 		redrawwin(c->window);
 	draw_border(c);
 	wrefresh(c->window);
+	arrange_event();
 }
 
 static void
@@ -614,10 +641,38 @@ keypress(int code) {
 
 	for (c = runinall ? clients : sel; c; c = c->next) {
 		if (!c->minimized || isarrange(fullscreen)) {
-			if (code == '\e')
-				vt_write(c->term, buf, len);
-			else
-				vt_keypress(c->term, code);
+			if (code == '\e') {
+				if (inputmode && evtfifo.fd != -1) {
+					char bufesc[sizeof(buf)*4+2] = { 'E' };
+					for (int i, j = 1; i < len; i++) {
+						switch (buf[i]) {
+						case '\a': bufesc[j++] = '\\'; bufesc[j++] = 'a'; break;
+						case '\b': bufesc[j++] = '\\'; bufesc[j++] = 'b'; break;
+						case '\f': bufesc[j++] = '\\'; bufesc[j++] = 'f'; break;
+						case '\n': bufesc[j++] = '\\'; bufesc[j++] = 'n'; break;
+						case '\r': bufesc[j++] = '\\'; bufesc[j++] = 'r'; break;
+						case '\t': bufesc[j++] = '\\'; bufesc[j++] = 't'; break;
+						case '\v': bufesc[j++] = '\\'; bufesc[j++] = 'v'; break;
+						case '\e': bufesc[j++] = '\\'; bufesc[j++] = 'e'; break;
+						case '\0': bufesc[j++] = '\\'; bufesc[j++] = '0'; break;
+						default:
+							if (buf[i] < ' ') {
+								bufesc[j++] = '\\'; bufesc[j++] = '0';
+								j += snprintf(bufesc + j, 2, "%02o", buf[i]);
+							} else
+								bufesc[j++] = buf[i];
+						}
+					}
+					write(evtfifo.fd, bufesc, len);
+				} else
+					vt_write(c->term, buf, len);
+			} else {
+				if (inputmode && evtfifo.fd != -1) {
+					char buf[4] = { 'K', code, '\n', '\0' };
+					write(evtfifo.fd, buf, sizeof(buf));
+				} else
+					vt_keypress(c->term, code);
+			}
 		}
 		if (!runinall)
 			break;
@@ -704,6 +759,10 @@ cleanup() {
 		close(cmdfifo.fd);
 	if (cmdfifo.file)
 		unlink(cmdfifo.file);
+	if (evtfifo.fd > 0)
+		close(evtfifo.fd);
+	if (evtfifo.file)
+		unlink(evtfifo.file);
 }
 
 static char *getcwd_by_pid(Client *c) {
@@ -1060,6 +1119,49 @@ zoom(const char *args[]) {
 	arrange();
 }
 
+static void
+focusid(const char *args[]) {
+	Client *c;
+
+	for (c = clients; c; c = c->next) {
+		if (c->id == atoi(args[0])) {
+			focus(c);
+			if (c->minimized)
+				toggleminimize(NULL);
+			return;
+		}
+	}
+}
+
+static void
+titleid(const char *args[]) {
+	Client *c;
+
+	for (c = clients; c; c = c->next) {
+		if (c->id == atoi(args[0])) {
+			strncpy(c->title, args[1], sizeof(c->title) - 1);
+			c->title[args[1] ? sizeof(c->title) - 1 : 0] = '\0';
+			settitle(c);
+			break;
+		}
+	}
+}
+
+static void
+setinputmode(const char *args[]) {
+	if (!args && !*args)
+		return;
+
+	switch (args[0][0]) {
+	case 'i':
+		inputmode = PIPE_INPUT;
+		break;
+	case 'n':
+	default:
+		inputmode = PIPE_NONE;
+	}
+}
+
 /* commands for use by mouse bindings */
 static void
 mouse_focus(const char *args[]) {
@@ -1267,7 +1369,7 @@ static void
 usage() {
 	cleanup();
 	eprint("usage: dvtm [-v] [-M] [-m mod] [-d delay] [-h lines] [-t title] "
-	       "[-s status-fifo] [-c cmd-fifo] [cmd...]\n");
+	       "[-s status-fifo] [-c cmd-fifo] [-e event-fifo] [cmd...]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1328,6 +1430,14 @@ parse_args(int argc, char *argv[]) {
 				if (!(fifo = realpath(argv[arg], NULL)))
 					error("%s\n", strerror(errno));
 				setenv("DVTM_CMD_FIFO", fifo, 1);
+				break;
+			}
+			case 'e': {
+				const char *fifo;
+				evtfifo.fd = open_or_create_fifo(argv[++arg], &evtfifo.file);
+				if (!(fifo = realpath(argv[arg], NULL)))
+					error("%s\n", strerror(errno));
+				setenv("DVTM_EVENT_FIFO", fifo, 1);
 				break;
 			}
 			default:

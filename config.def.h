@@ -167,6 +167,7 @@ static Cmd commands[] = {
 	{ "copymode",       { copymode,       { NULL }                    } },
 	{ "paste",          { paste,          { NULL }                    } },
 	{ "scrollback",     { scrollback,     { NULL }                    } },
+	{ "inputmode",      { inputmode,      { NULL }                    } },
 	{ "help",           { create,         { "man dvtm", "dvtm help" } } },
 };
 

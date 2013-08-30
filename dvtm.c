@@ -116,7 +116,7 @@ typedef struct {
 
 enum { BAR_TOP, BAR_BOTTOM, BAR_OFF };
 enum { ALIGN_LEFT, ALIGN_RIGHT };
-enum { PIPE_NONE, PIPE_INPUT };
+enum { PIPE_NONE, PIPE_INPUT = 0x01, PIPE_ESCAPE = 0x02, PIPE_BINDING = 0x04 };
 
 typedef struct {
 	int fd;
@@ -666,7 +666,7 @@ keypress(int code) {
 	for (c = runinall ? clients : sel; c; c = c->next) {
 		if (!c->minimized || isarrange(fullscreen)) {
 			if (code == '\e') {
-				if (inputmode && evtfifo.fd != -1) {
+				if (inputmode & PIPE_ESCAPE && evtfifo.fd != -1) {
 					char bufesc[sizeof(buf)*4+2] = { 'E' };
 					int lenesc = escapestring(bufesc+1, buf, len)+2;
 					bufesc[lenesc-1] = '\n';
@@ -674,11 +674,11 @@ keypress(int code) {
 				} else
 					vt_write(c->term, buf, len);
 			} else {
-				if (inputmode && evtfifo.fd != -1) {
+				if (inputmode & PIPE_INPUT && evtfifo.fd != -1) {
 					char bufesc[6] = { 'K' }; char c = (char)code;
-					int lenesc = escapestring(bufesc+1, &c, 1)+1;
+					int lenesc = escapestring(bufesc+1, &c, 1)+2;
 					bufesc[lenesc-1] = '\n';
-					write(evtfifo.fd, buf, lenesc);
+					write(evtfifo.fd, bufesc, lenesc);
 				} else
 					vt_keypress(c->term, code);
 			}
@@ -1158,16 +1158,24 @@ titleid(const char *args[]) {
 
 static void
 setinputmode(const char *args[]) {
+	inputmode = PIPE_NONE;
+
 	if (!args && !*args)
 		return;
 
-	switch (args[0][0]) {
-	case 'i':
-		inputmode = PIPE_INPUT;
-		break;
-	case 'n':
-	default:
-		inputmode = PIPE_NONE;
+	const char *p = args[0];
+	while (*p) {
+		switch (*p++) {
+		case 'i':
+			inputmode |= PIPE_INPUT;
+			break;
+		case 'e':
+			inputmode |= PIPE_ESCAPE;
+			break;
+		case 'b':
+			inputmode |= PIPE_BINDING;
+			break;
+		}
 	}
 }
 
@@ -1513,7 +1521,7 @@ main(int argc, char *argv[]) {
 			if (code >= 0) {
 				if (code == KEY_MOUSE) {
 					handle_mouse();
-				} else if (is_modifier(code)) {
+				} else if (!(inputmode & PIPE_BINDING) && is_modifier(code)) {
 					int mod = code;
 					code = getch();
 					if (code >= 0) {
@@ -1522,7 +1530,7 @@ main(int argc, char *argv[]) {
 						else if ((key = keybinding(mod, code)))
 							key->action.cmd(key->action.args);
 					}
-				} else if ((key = keybinding(0, code))) {
+				} else if (!(inputmode & PIPE_BINDING) && (key = keybinding(0, code))) {
 					key->action.cmd(key->action.args);
 				} else if (sel && vt_copymode(sel->term)) {
 					vt_copymode_keypress(sel->term, code);

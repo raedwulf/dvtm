@@ -1160,7 +1160,7 @@ static void
 setinputmode(const char *args[]) {
 	inputmode = PIPE_NONE;
 
-	if (!args && !*args)
+	if (!args || !*args)
 		return;
 
 	const char *p = args[0];

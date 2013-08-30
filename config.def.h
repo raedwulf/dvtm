@@ -158,6 +158,8 @@ static Cmd commands[] = {
 	{ "togglemouse",    { togglemouse,    { NULL }                    } },
 	{ "zoom ",          { zoom ,          { NULL }                    } },
 	{ "focus",          { focusn,         { NULL }                    } },
+	{ "focusid",        { focusid,        { NULL }                    } },
+	{ "titleid",        { titleid,        { NULL }                    } },
 	{ "quit",           { quit,           { NULL }                    } },
 	{ "escapekey",      { escapekey,      { NULL }                    } },
 	{ "togglerunall",   { togglerunall,   { NULL }                    } },
@@ -167,7 +169,7 @@ static Cmd commands[] = {
 	{ "copymode",       { copymode,       { NULL }                    } },
 	{ "paste",          { paste,          { NULL }                    } },
 	{ "scrollback",     { scrollback,     { NULL }                    } },
-	{ "inputmode",      { inputmode,      { NULL }                    } },
+	{ "inputmode",      { setinputmode,   { NULL }                    } },
 	{ "help",           { create,         { "man dvtm", "dvtm help" } } },
 };
 

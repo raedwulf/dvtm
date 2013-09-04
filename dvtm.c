@@ -116,6 +116,7 @@ typedef struct {
 
 enum { BAR_TOP, BAR_BOTTOM, BAR_OFF };
 enum { ALIGN_LEFT, ALIGN_RIGHT };
+enum { PIPE_NONE, PIPE_INPUT = 0x01, PIPE_ESCAPE = 0x02, PIPE_BINDING = 0x04 };
 
 typedef struct {
 	int fd;
@@ -166,6 +167,9 @@ static void toggleminimize(const char *args[]);
 static void togglemouse(const char *args[]);
 static void togglerunall(const char *args[]);
 static void zoom(const char *args[]);
+static void focusid(const char *args[]);
+static void titleid(const char *args[]);
+static void setinputmode(const char *args[]);
 
 /* commands for use by mouse bindings */
 static void mouse_focus(const char *args[]);
@@ -191,10 +195,12 @@ static bool mouse_events_enabled = ENABLE_MOUSE;
 static Layout *layout = layouts;
 static StatusBar bar = { -1, BAR_POS, 1 };
 static CmdFifo cmdfifo = { -1 };
+static CmdFifo evtfifo = { -1 };
 static const char *shell;
 static char *copybuf;
 static volatile sig_atomic_t running = true;
 static bool runinall = false;
+static int inputmode = PIPE_NONE;
 
 static void
 eprint(const char *errstr, ...) {
@@ -325,10 +331,30 @@ draw_all(bool border) {
 }
 
 static void
+arrange_event() {
+	if (evtfifo.fd != -1) {
+		Client *c;
+		char prefix = 'A';
+		write(evtfifo.fd, &prefix, 1);
+		for (c = clients; c; c = c->next) {
+			char buf[128];
+			int end = snprintf(buf, sizeof(buf),
+				"|%d,%d,%d,%d,%d,%d,%d,%d",
+				c->id, c->x, c->y, c->w, c->h,
+				c == sel, c->minimized, c->died);
+			write(evtfifo.fd, buf, end);
+		}
+		char newline = '\n';
+		write(evtfifo.fd, &newline, 1);
+	}
+}
+
+static void
 arrange() {
 	clear_workspace();
 	attrset(NORMAL_ATTR);
 	layout->arrange();
+	arrange_event();
 	wnoutrefresh(stdscr);
 	draw_all(true);
 }
@@ -401,6 +427,7 @@ focus(Client *c) {
 		redrawwin(c->window);
 	draw_border(c);
 	wrefresh(c->window);
+	arrange_event();
 }
 
 static void
@@ -598,6 +625,30 @@ keybinding(unsigned int mod, unsigned int code) {
 	return NULL;
 }
 
+static int
+escapestring(char *dst, const char *src, int len) {
+	int j = 0;
+	for (int i = 0; i < len; i++) {
+		switch (src[i]) {
+		case '\a': dst[j++] = '\\'; dst[j++] = 'a'; break;
+		case '\b': dst[j++] = '\\'; dst[j++] = 'b'; break;
+		case '\f': dst[j++] = '\\'; dst[j++] = 'f'; break;
+		case '\n': dst[j++] = '\\'; dst[j++] = 'n'; break;
+		case '\r': dst[j++] = '\\'; dst[j++] = 'r'; break;
+		case '\t': dst[j++] = '\\'; dst[j++] = 't'; break;
+		case '\v': dst[j++] = '\\'; dst[j++] = 'v'; break;
+		case '\e': dst[j++] = '\\'; dst[j++] = 'e'; break;
+		case '\0': dst[j++] = '\\'; dst[j++] = '0'; break;
+		default:
+			if (src[i] < ' ')
+				j += snprintf(dst + j, 5, "\\%03o", src[i]);
+			else
+				dst[j++] = src[i];
+		}
+	}
+	return j;
+}
+
 static void
 keypress(int code) {
 	Client *c;
@@ -614,10 +665,23 @@ keypress(int code) {
 
 	for (c = runinall ? clients : sel; c; c = c->next) {
 		if (!c->minimized || isarrange(fullscreen)) {
-			if (code == '\e')
-				vt_write(c->term, buf, len);
-			else
-				vt_keypress(c->term, code);
+			if (code == '\e') {
+				if (inputmode & PIPE_ESCAPE && evtfifo.fd != -1) {
+					char bufesc[sizeof(buf)*4+2] = { 'E' };
+					int lenesc = escapestring(bufesc+1, buf, len)+2;
+					bufesc[lenesc-1] = '\n';
+					write(evtfifo.fd, bufesc, lenesc);
+				} else
+					vt_write(c->term, buf, len);
+			} else {
+				if (inputmode & PIPE_INPUT && evtfifo.fd != -1) {
+					char bufesc[6] = { 'K' }; char c = (char)code;
+					int lenesc = escapestring(bufesc+1, &c, 1)+2;
+					bufesc[lenesc-1] = '\n';
+					write(evtfifo.fd, bufesc, lenesc);
+				} else
+					vt_keypress(c->term, code);
+			}
 		}
 		if (!runinall)
 			break;
@@ -704,6 +768,10 @@ cleanup() {
 		close(cmdfifo.fd);
 	if (cmdfifo.file)
 		unlink(cmdfifo.file);
+	if (evtfifo.fd > 0)
+		close(evtfifo.fd);
+	if (evtfifo.file)
+		unlink(evtfifo.file);
 }
 
 static char *getcwd_by_pid(Client *c) {
@@ -1060,6 +1128,57 @@ zoom(const char *args[]) {
 	arrange();
 }
 
+static void
+focusid(const char *args[]) {
+	Client *c;
+
+	for (c = clients; c; c = c->next) {
+		if (c->id == atoi(args[0])) {
+			focus(c);
+			if (c->minimized)
+				toggleminimize(NULL);
+			return;
+		}
+	}
+}
+
+static void
+titleid(const char *args[]) {
+	Client *c;
+
+	for (c = clients; c; c = c->next) {
+		if (c->id == atoi(args[0])) {
+			strncpy(c->title, args[1], sizeof(c->title) - 1);
+			c->title[args[1] ? sizeof(c->title) - 1 : 0] = '\0';
+			settitle(c);
+			break;
+		}
+	}
+}
+
+static void
+setinputmode(const char *args[]) {
+	inputmode = PIPE_NONE;
+
+	if (!args || !*args)
+		return;
+
+	const char *p = args[0];
+	while (*p) {
+		switch (*p++) {
+		case 'i':
+			inputmode |= PIPE_INPUT;
+			break;
+		case 'e':
+			inputmode |= PIPE_ESCAPE;
+			break;
+		case 'b':
+			inputmode |= PIPE_BINDING;
+			break;
+		}
+	}
+}
+
 /* commands for use by mouse bindings */
 static void
 mouse_focus(const char *args[]) {
@@ -1267,7 +1386,7 @@ static void
 usage() {
 	cleanup();
 	eprint("usage: dvtm [-v] [-M] [-m mod] [-d delay] [-h lines] [-t title] "
-	       "[-s status-fifo] [-c cmd-fifo] [cmd...]\n");
+	       "[-s status-fifo] [-c cmd-fifo] [-e event-fifo] [cmd...]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1328,6 +1447,14 @@ parse_args(int argc, char *argv[]) {
 				if (!(fifo = realpath(argv[arg], NULL)))
 					error("%s\n", strerror(errno));
 				setenv("DVTM_CMD_FIFO", fifo, 1);
+				break;
+			}
+			case 'e': {
+				const char *fifo;
+				evtfifo.fd = open_or_create_fifo(argv[++arg], &evtfifo.file);
+				if (!(fifo = realpath(argv[arg], NULL)))
+					error("%s\n", strerror(errno));
+				setenv("DVTM_EVENT_FIFO", fifo, 1);
 				break;
 			}
 			default:
@@ -1394,7 +1521,7 @@ main(int argc, char *argv[]) {
 			if (code >= 0) {
 				if (code == KEY_MOUSE) {
 					handle_mouse();
-				} else if (is_modifier(code)) {
+				} else if (!(inputmode & PIPE_BINDING) && is_modifier(code)) {
 					int mod = code;
 					code = getch();
 					if (code >= 0) {
@@ -1403,7 +1530,7 @@ main(int argc, char *argv[]) {
 						else if ((key = keybinding(mod, code)))
 							key->action.cmd(key->action.args);
 					}
-				} else if ((key = keybinding(0, code))) {
+				} else if (!(inputmode & PIPE_BINDING) && (key = keybinding(0, code))) {
 					key->action.cmd(key->action.args);
 				} else if (sel && vt_copymode(sel->term)) {
 					vt_copymode_keypress(sel->term, code);
